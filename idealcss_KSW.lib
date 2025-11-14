@@ -1,0 +1,162 @@
+proc inconsistent(ideal E, ideal N)
+{
+  int i;  
+  ideal radE = std(radical(E));
+  int ans = 1;
+  for (i = 1; i <= size(N); i++)
+  {
+    if (reduce(N[i], radE) != 0)
+    {
+      ans = 0;
+      break;
+    }
+  }
+  return(ans);
+}
+
+
+proc inconsistent_rad(ideal E, ideal N)
+{
+  // assume E is radical
+  int i;  
+  int ans = 1;
+  for (i = 1; i <= size(N); i++)
+  {
+    if (reduce(N[i], E) != 0)
+    {
+      ans = 0;
+      break;
+    }
+  }
+  return(ans);
+}
+
+
+proc MDBasis(ideal G)
+{
+  int i; int j;
+  ideal LMG;
+  for (i = 1; i <= size(G); i++)
+  {
+    LMG[size(LMG) + 1] = leadmonom(G[i]);
+  }
+  ideal LG = std(LMG);
+  
+  ideal basis;
+  for (i = 1; i <= size(LG); i++)
+  {
+    for (j = 1; j <= size(G); j++)
+    {
+      if (leadmonom(G[j]) == LG[i])
+      {
+	basis[size(basis) + 1] = G[j];
+	break;
+      }
+    }
+  }
+
+  return(basis);
+}
+
+
+proc KSW(ideal E, ideal N, ideal F)
+{
+  int i;
+  E = std(radical(E));
+  ideal G = std(F + E);
+  if (G[1] == 1) {return(list(E, N, ideal(1)));}
+  if (idealsEqual(G, E) == 1) {return(list(E, N, ideal(0)));}
+
+  // create Gr from G
+  setring(RGlobal);
+  ideal Gr, compleGr; // compleGr is G\Gr
+  ideal G = imap(RAll, G);
+  for (i = 1; i <= size(G); i++)
+  {
+    if (leadmonom(G[i]) == 1) {Gr[size(Gr) + 1] = G[i];}
+    else {compleGr[size(compleGr) + 1] = G[i];}
+  }
+  
+  setring(RAll);
+  ideal Gr = imap(RGlobal, Gr);
+  ideal compleGr = imap(RGlobal, compleGr);
+
+  list PGB;
+  if (inconsistent_rad(E, Gr*N) == 0)
+  {
+    PGB[size(PGB) + 1] = list(E, Gr*N, ideal(1));
+  }
+  if (inconsistent(Gr, N)) {return(PGB);}
+
+  setring(R);
+  ideal Gm = MDBasis(imap(RAll, compleGr));
+
+  list coefs;
+  for (i = 1; i <= size(Gm); i++) {coefs[size(coefs) + 1] = leadcoef(Gm[i]);}
+  
+  setring(RAll);
+  list coefs = imap(R, coefs);
+  ideal factors;
+  for (i = 1; i <= size(coefs); i++)
+  {
+    if (leadmonom(coefs[i]) == poly(1)) {i++; continue;}
+    factors = factors + factorize(coefs[i], 1);
+  }
+  list h;
+  list hp = poly(1);
+  for (i = 1; i <= size(factors); i++)
+  {
+    h[size(h) + 1] = factors[i];
+    hp[size(hp) + 1] = hp[size(hp)] * factors[i];
+  }
+
+  if (inconsistent(Gr, N*hp[size(hp)]) == 0)
+  {
+    PGB[size(PGB) + 1] = list(Gr, N*hp[size(hp)], imap(R, Gm));
+  }
+
+  list result;
+  for (i = 1; i <= size(h); i++)
+  {
+    if (inconsistent(Gr+h[i], N*hp[i]) == 1) {i++; continue;}
+    result = KSW(Gr+h[i], N*hp[i], compleGr);
+    if (size(result) != 0) {PGB = PGB + result;}
+  }
+  return(PGB);  
+}
+
+
+proc cgs(ideal F)
+{
+  // assume ring variable R is declared globally; R=(0,a,b,c),(x,y),Ds;
+  // assume elements of F is polys on R
+
+  list RL = ringlist(R);
+  list params = RL[1][2];
+  list vars = RL[2];
+
+  // define RGlobal; RGlobal=(0,a,b,c),(x,y),dp
+  RL[3][1][1] = "dp";
+  ring RGlobal = ring(RL);
+
+  // define RAll; RAll=0,(x,y,a,b,c),(Ds(2),lp(3))
+  int n = size(vars); int m = size(params);
+  list RLAll;
+  // n = 1 で場合分けしないとバグる
+  if (n == 1) {RLAll = ringlist(ring(0, (x(1..n+m)), (Ds,lp)));}
+  else {RLAll = ringlist(ring(0, (x(1..n+m)), (Ds(n),lp)));}
+  RLAll[2] = vars + params;
+  ring RAll = ring(RLAll);
+
+  // export two ring variables: RAll, RGlobal
+  export(RAll); export(RGlobal);
+
+  // load required library
+  LIB "primdec.lib";
+  // set the option redSB
+  option(redSB);
+
+  list result = KSW(ideal(0), ideal(1), imap(R,F));
+  setring(R);
+  return(imap(RAll, result));
+}
